@@ -73,6 +73,26 @@ public class CardStackModel<Element: Identifiable, Direction: Equatable>: Observ
         currentIndex = nil
     }
     
+    /// Subscribe to an external publisher of element arrays and update the model automatically.
+    public func bind<P: Publisher>(to publisher: P) where P.Output == [Element], P.Failure == Never {
+        publisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] elements in
+                guard let self = self else { return }
+                // Preserve currentIndex when updating data
+                let oldIndex = self.currentIndex
+                // Refresh data items
+                self.data = elements.map { CardStackData($0) }
+                // Restore or reset index without forcing to zero
+                if let idx = oldIndex, idx < self.data.count {
+                    self.currentIndex = idx
+                } else {
+                    self.currentIndex = self.data.isEmpty ? nil : 0
+                }
+            }
+            .store(in: &subscriptions)
+    }
+    
     public func swipe(direction: Direction, completion: ((Element, Direction) -> Void)?) {
         guard let currentIndex = currentIndex else {
             return
