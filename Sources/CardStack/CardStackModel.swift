@@ -28,26 +28,55 @@ public class CardStackModel<Element: Identifiable, Direction: Equatable>: Observ
     
     private var subscriptions: Set<AnyCancellable> = []
         
-    public init(_ elements: [Element]) {
-        data = elements.map { CardStackData($0) }
-        currentIndex = elements.count > 0 ? 0 : nil
-        numberOfElements = elements.count
-        numberOfElementsRemaining = elements.count
-        
+    /// Sets up internal Combine bindings for element count tracking.
+    private func setupSubscriptions() {
         $data
             .sink { [weak self] data in
                 guard let self = self else { return }
                 self.numberOfElements = data.count
             }
             .store(in: &subscriptions)
-        
+
         $numberOfElements.combineLatest($currentIndex)
             .sink { [weak self] number, index in
                 guard let self = self else { return }
-                if let index = index  {
+                if let index = index {
                     self.numberOfElementsRemaining = number - index
                 } else {
                     self.numberOfElementsRemaining = 0
+                }
+            }
+            .store(in: &subscriptions)
+    }
+    
+    /// Initialize with a static array of elements.
+    public init(_ elements: [Element]) {
+        data = elements.map { CardStackData($0) }
+        currentIndex = elements.count > 0 ? 0 : nil
+        numberOfElements = elements.count
+        numberOfElementsRemaining = elements.count
+        
+        setupSubscriptions()
+    }
+    
+    /// Initialize by binding to a Combine publisher of element arrays.
+    public init<P: Publisher>(_ publisher: P) where P.Output == [Element], P.Failure == Never {
+        data = []
+        currentIndex = nil
+        numberOfElements = 0
+        numberOfElementsRemaining = 0
+        
+        setupSubscriptions()
+        
+        publisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] elements in
+                guard let self = self else { return }
+                // Append only new elements; do not reset index or existing data
+                let existingIDs = Set(self.data.map { $0.id })
+                let newItems = elements.filter { !existingIDs.contains($0.id) }
+                if !newItems.isEmpty {
+                    self.appendElements(newItems)
                 }
             }
             .store(in: &subscriptions)
@@ -73,17 +102,15 @@ public class CardStackModel<Element: Identifiable, Direction: Equatable>: Observ
         currentIndex = nil
     }
     
-    /// Subscribe to an external publisher of element arrays and update the model automatically.
+    /// Deprecated: use the publisher init instead.
+    @available(*, deprecated, message: "Use init(_ publisher:) instead")
     public func bind<P: Publisher>(to publisher: P) where P.Output == [Element], P.Failure == Never {
         publisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] elements in
                 guard let self = self else { return }
-                // Preserve currentIndex when updating data
                 let oldIndex = self.currentIndex
-                // Refresh data items
                 self.data = elements.map { CardStackData($0) }
-                // Restore or reset index without forcing to zero
                 if let idx = oldIndex, idx < self.data.count {
                     self.currentIndex = idx
                 } else {
@@ -129,6 +156,4 @@ public class CardStackModel<Element: Identifiable, Direction: Equatable>: Observ
         guard let index = data.firstIndex(where: { $0.id == dataPiece.id }) else { return nil }
         return index - (currentIndex ?? data.count)
     }
-    
-    
 }
