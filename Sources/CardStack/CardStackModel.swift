@@ -72,7 +72,17 @@ public class CardStackModel<Element: Identifiable, Direction: Equatable>: Observ
             .receive(on: DispatchQueue.main)
             .sink { [weak self] elements in
                 guard let self = self else { return }
-                // Append only new elements; do not reset index or existing data
+                // If upstream publishes an empty array, clear the stack (e.g., on filter change/reset)
+                if elements.isEmpty {
+                    self.removeAllElements()
+                    return
+                }
+                // If first load or incoming is a full replacement (e.g., filters applied), replace data
+                if self.data.isEmpty || elements.count < self.data.count {
+                    self.setElements(elements)
+                    return
+                }
+                // Otherwise, append only new elements; do not reset index or existing data
                 let existingIDs = Set(self.data.map { $0.id })
                 let newItems = elements.filter { !existingIDs.contains($0.id) }
                 if !newItems.isEmpty {
